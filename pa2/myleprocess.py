@@ -1,26 +1,16 @@
-"""
-myleprocess.py -- CS158A PA2: Leader Election on an asynchronous ring.
-
-Implements the Chang-Roberts leader election algorithm over a ring of
-TCP-connected processes. Each process has exactly two neighbors:
-  - a SERVER role: binds/listens/accepts a connection from the neighbor
-    that will act as a client toward us. We RECEIVE messages on this
-    connection.
-  - a CLIENT role: connects out to the other neighbor's server. We SEND
-    messages on this connection.
-
-Messages always flow client -> server, so the ring's message direction
-is fixed by who connects to whom (see config.txt).
-
-Usage:
-    python3 myleprocess.py [config_file] [log_file] [--wait]
-
-    config_file  path to the config file (default: config.txt)
-    log_file     path to the log file to write (default: log.txt)
-    --wait       pause with an interactive prompt between starting the
-                 server and connecting as a client, so all processes in
-                 a classroom demo can be started before anyone connects.
-"""
+# myleprocess.py
+# CS158A PA2 - Leader Election on a ring
+#
+# Each process connects to two neighbors:
+#   - it runs a server and waits for one neighbor to connect to it (this is
+#     how it receives messages)
+#   - it also connects out to the other neighbor as a client (this is how
+#     it sends messages)
+#
+# Run it like this:
+#   python3 myleprocess.py config.txt log.txt
+# Add --wait if you want to pause before connecting out, so everyone in
+# the ring has time to start their server first.
 
 import json
 import socket
@@ -32,11 +22,10 @@ from datetime import datetime
 
 
 class Message:
-    """Election message exchanged between neighbors, serialized as JSON."""
-
+    # what gets sent over the socket, turned into JSON
     def __init__(self, uuid, flag):
-        self.uuid = uuid  # uuid.UUID of the candidate/leader
-        self.flag = flag  # 0 = still electing, 1 = leader already elected
+        self.uuid = uuid
+        self.flag = flag
 
     def to_json(self):
         return json.dumps({"uuid": str(self.uuid), "flag": self.flag})
@@ -53,17 +42,21 @@ class LeaderElectionNode:
         self.log_path = log_path
         self.interactive_wait = interactive_wait
 
+        # my own random id, this stays the same the whole time
         self.my_id = uuid_lib.uuid4()
         self.leader_id = None
-        self.state = 0  # 0 = still electing, 1 = leader known
+        # 0 = still voting, 1 = we know who the leader is
+        self.state = 0
 
         self.server_ip = None
         self.server_port = None
         self.neighbor_ip = None
         self.neighbor_port = None
 
-        self.recv_conn = None  # accepted socket (server side) -- we receive here
-        self.send_conn = None  # connected socket (client side) -- we send here
+        # socket we accept as a server, this is where we read messages from
+        self.recv_conn = None
+        # socket we open as a client, this is where we write messages to
+        self.send_conn = None
 
         self._log_lock = threading.Lock()
         self._server_ready = threading.Event()
@@ -71,9 +64,9 @@ class LeaderElectionNode:
         self._read_config()
         self._init_log()
 
-    # ---- setup -----------------------------------------------------
-
     def _read_config(self):
+        # first line = my own ip/port to listen on
+        # second line = the neighbor i connect out to
         with open(self.config_path) as f:
             lines = [line.strip() for line in f if line.strip()]
         self.server_ip, port_str = [p.strip() for p in lines[0].split(",")]
@@ -82,6 +75,7 @@ class LeaderElectionNode:
         self.neighbor_port = int(port_str2)
 
     def _init_log(self):
+        # start with an empty log file
         with open(self.log_path, "w"):
             pass
 
@@ -91,20 +85,21 @@ class LeaderElectionNode:
             with open(self.log_path, "a") as f:
                 f.write(f"[{timestamp}] {line}\n")
 
-    # ---- connection setup (server thread + client connect) ---------
-
     def _run_server(self):
+        # this waits for the other neighbor to connect to us
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((self.server_ip, self.server_port))
         srv.listen(1)
         print(f"[server] listening on {self.server_ip}:{self.server_port}")
-        conn, addr = srv.accept()  # blocks until the other neighbor connects
+        # this line blocks until someone connects
+        conn, addr = srv.accept()
         print(f"[server] accepted connection from {addr}")
         self.recv_conn = conn
         self._server_ready.set()
 
     def _connect_client(self):
+        # keep trying in case the neighbor's server isn't up yet
         while True:
             try:
                 cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -113,12 +108,10 @@ class LeaderElectionNode:
                 print(f"[client] connected to {self.neighbor_ip}:{self.neighbor_port}")
                 return
             except (ConnectionRefusedError, OSError):
-                # neighbor's server may not be up yet -- retry until it is
                 time.sleep(1)
 
-    # ---- messaging ---------------------------------------------------
-
     def _send_message(self, msg):
+        # add a newline so the other side knows where the message ends
         data = (msg.to_json() + "\n").encode("utf-8")
         self.send_conn.sendall(data)
         self.log(f"Sent: uuid={msg.uuid}, flag={msg.flag}")
@@ -129,15 +122,13 @@ class LeaderElectionNode:
             return None
         return Message.from_json(line.decode("utf-8").strip())
 
-    # ---- main algorithm ----------------------------------------------
-
     def start(self):
         print(f"My id: {self.my_id}")
         self.log(f"My id: {self.my_id}")
 
-        # Run accept() on its own thread so it can block while we also
-        # connect() as a client -- doing both sequentially on one thread
-        # would deadlock every node in the ring at once.
+        # accept() has to run on its own thread, otherwise every node in
+        # the ring would be stuck waiting for accept() and nobody would
+        # ever get to connect()
         server_thread = threading.Thread(target=self._run_server, daemon=True)
         server_thread.start()
 
@@ -148,11 +139,11 @@ class LeaderElectionNode:
         self._server_ready.wait()
         server_thread.join()
 
-        # Initial message: send our own id with no comparison. Happens once.
+        # send my own id once, no comparison needed for this first message
         self._send_message(Message(self.my_id, 0))
 
-        # From here on a single (the main) thread is enough: we just
-        # block on recv, compare, and forward/ignore.
+        # once both connections are up, one thread is all we need,
+        # just read a message, decide what to do, repeat
         reader = self.recv_conn.makefile("rb")
 
         while True:
@@ -160,6 +151,7 @@ class LeaderElectionNode:
             if msg is None:
                 break
 
+            # figure out how the incoming id compares to mine, just for the log
             if msg.uuid > self.my_id:
                 relation = "greater"
             elif msg.uuid < self.my_id:
@@ -171,9 +163,8 @@ class LeaderElectionNode:
             self.log(f"Received: uuid={msg.uuid}, flag={msg.flag}, {relation}, {state_str}")
 
             if msg.flag == 1:
-                # Leader announcement circulating the ring. Record it,
-                # relay it once so the next node also learns it, then
-                # this node's job is done.
+                # someone already found the leader, pass the news along
+                # once and then i'm done
                 self.leader_id = msg.uuid
                 self.state = 1
                 print(f"Leader is decided to {self.leader_id}.")
@@ -181,13 +172,16 @@ class LeaderElectionNode:
                 self._send_message(Message(self.leader_id, 1))
                 break
 
-            # flag == 0: still electing
+            # still electing at this point
             if msg.uuid > self.my_id:
+                # someone else has a better shot at being leader, pass it on
                 self._send_message(Message(msg.uuid, 0))
             elif msg.uuid < self.my_id:
+                # my id beats theirs, drop their message
                 self.log(f"Ignored: uuid={msg.uuid} is less than mine.")
             else:
-                # Our own id circulated the whole ring back to us: we win.
+                # this is my own id, it made it all the way around the ring
+                # so i'm the leader
                 self.leader_id = self.my_id
                 self.state = 1
                 print(f"Leader is decided to {self.leader_id}.")

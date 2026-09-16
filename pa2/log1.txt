@@ -1,10 +1,1 @@
-[11:33:33.400633] My id: d673665e-ca05-4b77-a53c-8803ae64389e
-[11:33:40.036781] Sent: uuid=d673665e-ca05-4b77-a53c-8803ae64389e, flag=0
-[11:33:40.527471] Received: uuid=7519cfae-76ab-4842-b45b-d428506bd285, flag=0, less, 0
-[11:33:40.527728] Ignored: uuid=7519cfae-76ab-4842-b45b-d428506bd285 is less than mine.
-[11:33:40.527906] Received: uuid=b5a7e7ae-608f-4557-a9d6-5e92710592e7, flag=0, less, 0
-[11:33:40.528019] Ignored: uuid=b5a7e7ae-608f-4557-a9d6-5e92710592e7 is less than mine.
-[11:33:40.528139] Received: uuid=d673665e-ca05-4b77-a53c-8803ae64389e, flag=0, same, 0
-[11:33:40.528248] Leader is decided to d673665e-ca05-4b77-a53c-8803ae64389e.
-[11:33:40.528419] Sent: uuid=d673665e-ca05-4b77-a53c-8803ae64389e, flag=1
-[11:33:40.528519] leader is d673665e-ca05-4b77-a53c-8803ae64389e
+[17:09:35.304038] My id: e8e767b2-0735-48fa-a13b-6620aae0e76d
