@@ -60,6 +60,8 @@ class LeaderElectionNode:
 
         self._log_lock = threading.Lock()
         self._server_ready = threading.Event()
+        # holds bytes we've read off the socket but haven't used yet
+        self._recv_buffer = b""
 
         self._read_config()
         self._init_log()
@@ -111,16 +113,25 @@ class LeaderElectionNode:
                 time.sleep(1)
 
     def _send_message(self, msg):
-        # add a newline so the other side knows where the message ends
-        data = (msg.to_json() + "\n").encode("utf-8")
+        # the json itself already ends in "}", that's our end of message marker
+        data = msg.to_json().encode("utf-8")
         self.send_conn.sendall(data)
         self.log(f"Sent: uuid={msg.uuid}, flag={msg.flag}")
 
-    def _recv_message(self, reader):
-        line = reader.readline()
-        if not line:
-            return None
-        return Message.from_json(line.decode("utf-8").strip())
+    def _recv_message(self, sock):
+        # tcp is just a stream of bytes, so we keep reading until we see
+        # the closing "}" that marks the end of one message
+        while b"}" not in self._recv_buffer:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return None
+            self._recv_buffer += chunk
+
+        end = self._recv_buffer.index(b"}")
+        raw = self._recv_buffer[: end + 1]
+        # keep whatever came after the "}" for the next message
+        self._recv_buffer = self._recv_buffer[end + 1 :]
+        return Message.from_json(raw.decode("utf-8"))
 
     def start(self):
         print(f"My id: {self.my_id}")
@@ -144,10 +155,8 @@ class LeaderElectionNode:
 
         # once both connections are up, one thread is all we need,
         # just read a message, decide what to do, repeat
-        reader = self.recv_conn.makefile("rb")
-
         while True:
-            msg = self._recv_message(reader)
+            msg = self._recv_message(self.recv_conn)
             if msg is None:
                 break
 
