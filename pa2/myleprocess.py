@@ -1,16 +1,4 @@
-# myleprocess.py
 # CS158A PA2 - Leader Election on a ring
-#
-# Each process connects to two neighbors:
-#   - it runs a server and waits for one neighbor to connect to it (this is
-#     how it receives messages)
-#   - it also connects out to the other neighbor as a client (this is how
-#     it sends messages)
-#
-# Run it like this:
-#   python3 myleprocess.py config.txt log.txt
-# Add --wait if you want to pause before connecting out, so everyone in
-# the ring has time to start their server first.
 
 import json
 import socket
